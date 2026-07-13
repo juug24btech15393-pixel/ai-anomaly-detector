@@ -38,9 +38,9 @@ def generate_gemma_report(ocsf_log_json):
         
         # Calling Google's native gemma-2-9b-it model
         response = client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=prompt,
-        )
+         model='gemini-2.5-flash',
+         contents=prompt,
+     )
         return response.text
     except Exception as e:
         return f"Could not connect to Gemma engine: {str(e)}"
