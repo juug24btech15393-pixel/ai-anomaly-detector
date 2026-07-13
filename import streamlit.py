@@ -15,12 +15,12 @@ st.write("This dashboard normalizes AI anomaly alerts into the official **OCSF S
 
 # ----------------- LLM EXPLANATION FUNCTION -----------------
 def generate_gemma_report(ocsf_log_json):
-    """Sends the OCSF log payload to Google Gemma to write an operations summary."""
+    """Sends the OCSF log payload to the Google GenAI API to write an operations summary."""
     if "GEMINI_API_KEY" not in st.secrets:
-        return "⚠️ **Gemma Engine Paused**: Please add your GEMINI_API_KEY to the Streamlit Secret Manager to enable live reporting."
+        return "⚠️ **AI Engine Paused**: Please add your GEMINI_API_KEY to the Streamlit Secret Manager to enable live reporting."
         
     try:
-        # Initialize Google GenAI client using secrets management
+        # Initialize Google GenAI client
         client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
         
         prompt = f"""
@@ -36,14 +36,14 @@ def generate_gemma_report(ocsf_log_json):
         Keep it direct, readable for non-coders, and concise.
         """
         
-        # Calling Google's native gemma-2-9b-it model
+        # Using the standard production identifier format
         response = client.models.generate_content(
-         model='gemini-2.5-flash',
-         contents=prompt,
-     )
+            model='gemini-2.5-flash',
+            contents=prompt,
+        )
         return response.text
     except Exception as e:
-        return f"Could not connect to Gemma engine: {str(e)}"
+        return f"AI Engine Connection Error: {str(e)}"
 
 # ----------------- DATA GENERATION & MODEL TRAINING -----------------
 @st.cache_resource
