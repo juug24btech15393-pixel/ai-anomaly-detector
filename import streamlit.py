@@ -38,7 +38,7 @@ def generate_gemma_report(ocsf_log_json):
         
         # Calling Google's native gemma-2-9b-it model
         response = client.models.generate_content(
-            model='gemma-2-9b-it',
+            model='models/gemma-2-9b-it',
             contents=prompt,
         )
         return response.text
