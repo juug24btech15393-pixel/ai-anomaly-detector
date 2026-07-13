@@ -5,45 +5,60 @@ import matplotlib.pyplot as plt
 from sklearn.ensemble import IsolationForest
 import json
 from datetime import datetime
-from google import genai  # <-- Switched to Google's official SDK
+import requests  # <-- Natively hits the endpoint without library dependency
 
 # Set page title and layout
 st.set_page_config(page_title="AI Industrial Anomaly Detector", layout="wide")
 
 st.title("🏭 AI Industrial Anomaly Detector with Google Gemma & OCSF")
-st.write("This dashboard normalizes AI anomaly alerts into the official **OCSF Security Schema**, then passes the data to **Google Gemma AI** to build plain-text incident mitigation logs.")
+st.write("This dashboard normalizes AI anomaly alerts into the official **OCSF Security Schema**, then passes the data to **Google Gemini/Gemma AI** to build plain-text incident mitigation logs.")
 
-# ----------------- LLM EXPLANATION FUNCTION -----------------
+# ----------------- NATIVE LLM CALL FUNCTION -----------------
 def generate_gemma_report(ocsf_log_json):
-    """Sends the OCSF log payload to the Google GenAI API to write an operations summary."""
+    """Sends the OCSF log payload directly via HTTP POST to Google AI Studio."""
     if "GEMINI_API_KEY" not in st.secrets:
         return "⚠️ **AI Engine Paused**: Please add your GEMINI_API_KEY to the Streamlit Secret Manager to enable live reporting."
         
+    api_key = st.secrets["GEMINI_API_KEY"]
+    
+    # Direct Google AI Endpoint for the ultra-stable flash model
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+    
+    prompt = f"""
+    You are an expert Industrial Cybersecurity Analyst. 
+    Review this standardized OCSF (Open Cybersecurity Schema Framework) Detection Finding log from a factory sensor:
+    {ocsf_log_json}
+    
+    Write a brief, professional incident mitigation overview for factory operators.
+    Your response must include:
+    1. **Summary**: A simple explanation of what happened based on the resource metrics.
+    2. **Risk Assessment**: How this specific anomaly impacts production safety.
+    3. **Mitigation Blueprint**: 2 steps the local engineering team should take immediately.
+    Keep it direct, readable for non-coders, and concise.
+    """
+    
+    headers = {'Content-Type': 'application/json'}
+    payload = {
+        "contents": [
+            {
+                "parts": [{"text": prompt}]
+            }
+        ]
+    }
+    
     try:
-        # Initialize Google GenAI client
-        client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+        response = requests.post(url, headers=headers, json=payload)
+        response_data = response.json()
         
-        prompt = f"""
-        You are an expert Industrial Cybersecurity Analyst. 
-        Review this standardized OCSF (Open Cybersecurity Schema Framework) Detection Finding log from a factory sensor:
-        {ocsf_log_json}
-        
-        Write a brief, professional incident mitigation overview for factory operators.
-        Your response must include:
-        1. **Summary**: A simple explanation of what happened based on the resource metrics.
-        2. **Risk Assessment**: How this specific anomaly impacts production safety.
-        3. **Mitigation Blueprint**: 2 steps the local engineering team should take immediately.
-        Keep it direct, readable for non-coders, and concise.
-        """
-        
-        # Using the standard production identifier format
-        response = client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=prompt,
-        )
-        return response.text
+        # Parse the text response natively out of Google's JSON structure
+        if response.status_code == 200:
+            return response_data['candidates'][0]['content']['parts'][0]['text']
+        else:
+            error_msg = response_data.get('error', {}).get('message', 'Unknown Error')
+            return f"AI Engine Connection Error ({response.status_code}): {error_msg}"
+            
     except Exception as e:
-        return f"AI Engine Connection Error: {str(e)}"
+        return f"Failed to send request: {str(e)}"
 
 # ----------------- DATA GENERATION & MODEL TRAINING -----------------
 @st.cache_resource
@@ -123,8 +138,8 @@ if guess == -1:
         st.json(ocsf_log)
         
     with col2:
-        st.subheader("🤖 Google Gemma Co-Pilot Summary")
-        with st.spinner("Gemma is decoding the OCSF schema..."):
+        st.subheader("🤖 Google AI Co-Pilot Summary")
+        with st.spinner("Decoding the OCSF schema payload..."):
             log_string = json.dumps(ocsf_log, indent=2)
             report = generate_gemma_report(log_string)
             st.markdown(report)
