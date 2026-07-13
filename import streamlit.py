@@ -130,3 +130,43 @@ if guess == -1:
             st.markdown(report)
 else:
     st.success(f"🟢 System Telemetry Stable: Current value ({test_temp}°C) operates safely within standard deviation limits.")
+
+with col2:
+        st.subheader("🤖 Google AI Co-Pilot Summary")
+        with st.spinner("Decoding the OCSF schema payload..."):
+            log_string = json.dumps(ocsf_log, indent=2)
+            report = generate_gemma_report(log_string)
+            st.markdown(report)
+            
+        # ---- NEW: INTERACTIVE CO-PILOT CHAT BOX ----
+        st.markdown("---")
+        st.markdown("### 💬 Ask Co-Pilot Follow-Up Questions")
+        user_question = st.text_input(
+            "Ask Gemini anything about this incident (e.g., 'What safety gear do I need?'):", 
+            key="incident_qa"
+        )
+
+        if user_question:
+            with st.spinner("Gemini is thinking..."):
+                # We feed Gemini both the OCSF log and the user's custom question
+                chat_prompt = f"""
+                Context Log: {log_string}
+                
+                User Question: {user_question}
+                
+                Answer the user's question accurately. If it is about the incident log above, use the data to assist them. If it is a general question, answer it like a helpful AI assistant. Keep it concise.
+                """
+                
+                # Direct secure API call to the Gemini engine
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key={api_key}"
+                headers = {'Content-Type': 'application/json'}
+                payload = {"contents": [{"parts": [{"text": chat_prompt}]}]}
+                
+                try:
+                    res = requests.post(url, headers=headers, json=payload)
+                    if res.status_code == 200:
+                        st.info(res.json()['candidates'][0]['content']['parts'][0]['text'])
+                    else:
+                        st.error(f"Chat Error: {res.json().get('error', {}).get('message', 'Unknown API Error')}")
+                except Exception as e:
+                    st.error(f"Failed to reach Gemini: {str(e)}")
