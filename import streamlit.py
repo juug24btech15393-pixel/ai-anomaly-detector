@@ -92,13 +92,16 @@ guess = ai_brain.predict([[test_temp]])[0]
 if guess == -1:
     st.error(f"⚠️ SIEM ALERT TRIGGERED! Abnormal Thermal Metric: {test_temp}°C")
     
+    # Calculate local timestamp adjusted for India Standard Time (IST: UTC + 5h 30m)
+    local_timestamp = int(datetime.now().timestamp()) + 19800
+    
     # Standardized Open Cybersecurity Schema Framework Object
     ocsf_log = {
         "metadata": {
             "version": "1.3.0",
             "product": {"vendor": "FactoryAI", "name": "Thermal Anomaly Engine", "version": "1.0.0"}
         },
-        "time": int(datetime.now().timestamp()),
+        "time": local_timestamp,
         "class_uid": 2004,
         "class_name": "Detection Finding",
         "category_uid": 2,
@@ -108,7 +111,7 @@ if guess == -1:
         "severity": "Critical",
         "finding_info": {
             "title": "AI Thermal Spike Detected",
-            "uid": f"ALERT-{int(datetime.now().timestamp())}",
+            "uid": f"ALERT-{local_timestamp}",
             "desc": "Isolation Forest flagged abnormal industrial hardware thermal activity.",
             "analytic": {"name": "IsolationForest_Model", "type": "Anomaly Detection"}
         },
@@ -128,45 +131,38 @@ if guess == -1:
             log_string = json.dumps(ocsf_log, indent=2)
             report = generate_gemma_report(log_string)
             st.markdown(report)
-else:
-    st.success(f"🟢 System Telemetry Stable: Current value ({test_temp}°C) operates safely within standard deviation limits.")
-
-with col2:
-        st.subheader("🤖 Google AI Co-Pilot Summary")
-        with st.spinner("Decoding the OCSF schema payload..."):
-            log_string = json.dumps(ocsf_log, indent=2)
-            report = generate_gemma_report(log_string)
-            st.markdown(report)
             
-        # ---- NEW: INTERACTIVE CO-PILOT CHAT BOX ----
+        # ---- INTERACTIVE CO-PILOT CHAT ASSISTANT ----
         st.markdown("---")
         st.markdown("### 💬 Ask Co-Pilot Follow-Up Questions")
         user_question = st.text_input(
-            "Ask Gemini anything about this incident (e.g., 'What safety gear do I need?'):", 
+            "Ask anything about this incident (e.g., 'What safety gear do I need?'):", 
             key="incident_qa"
         )
 
         if user_question:
-            with st.spinner("Gemini is thinking..."):
-                # We feed Gemini both the OCSF log and the user's custom question
-                chat_prompt = f"""
-                Context Log: {log_string}
-                
-                User Question: {user_question}
-                
-                Answer the user's question accurately. If it is about the incident log above, use the data to assist them. If it is a general question, answer it like a helpful AI assistant. Keep it concise.
-                """
-                
-                # Direct secure API call to the Gemini engine
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key={api_key}"
-                headers = {'Content-Type': 'application/json'}
-                payload = {"contents": [{"parts": [{"text": chat_prompt}]}]}
-                
+            if "GEMINI_API_KEY" in st.secrets:
                 try:
-                    res = requests.post(url, headers=headers, json=payload)
-                    if res.status_code == 200:
-                        st.info(res.json()['candidates'][0]['content']['parts'][0]['text'])
-                    else:
-                        st.error(f"Chat Error: {res.json().get('error', {}).get('message', 'Unknown API Error')}")
+                    # Leverage the imported SDK client context cleanly for the custom chatbot prompt
+                    client_chat = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+                    
+                    chat_prompt = f"""
+                    Context Log: {log_string}
+                    
+                    User Question: {user_question}
+                    
+                    Answer the user's question accurately. If it is about the incident log above, use the data to assist them. If it is a general question, answer it like a helpful AI assistant. Keep it concise.
+                    """
+                    
+                    with st.spinner("Gemini is thinking..."):
+                        chat_response = client_chat.models.generate_content(
+                            model='gemini-3.5-flash',
+                            contents=chat_prompt,
+                        )
+                        st.info(chat_response.text)
                 except Exception as e:
-                    st.error(f"Failed to reach Gemini: {str(e)}")
+                    st.error(f"Chat Error: {str(e)}")
+            else:
+                st.warning("Please configure your API Key to use the interactive chat box.")
+else:
+    st.success(f"🟢 System Telemetry Stable: Current value ({test_temp}°C) operates safely within standard deviation limits.")
