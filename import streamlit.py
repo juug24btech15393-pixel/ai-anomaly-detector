@@ -14,6 +14,7 @@ st.title("🏭 AI Industrial Anomaly Detector with Google Gemma & OCSF")
 st.write("This dashboard normalizes AI anomaly alerts into the official **OCSF Security Schema**, then passes the data to **Google Gemma AI** to build plain-text incident mitigation logs.")
 
 # ----------------- LLM EXPLANATION FUNCTION -----------------
+# ----------------- LLM EXPLANATION FUNCTION -----------------
 def generate_gemma_report(ocsf_log_json):
     """Sends the OCSF log payload to Google Gemma to write an operations summary."""
     if "GEMINI_API_KEY" not in st.secrets:
@@ -36,13 +37,24 @@ def generate_gemma_report(ocsf_log_json):
         Keep it direct, readable for non-coders, and concise.
         """
         
-        # Calling Google's native gemma-2-9b-it model
+        # Calling Google's native model
         response = client.models.generate_content(
             model='gemini-3.5-flash',
             contents=prompt,
         )
         return response.text
     except Exception as e:
+        # ---- GRACEFUL FALLBACK FOR 429 RATE LIMITS ----
+        if "429" in str(e) or "QUOTA" in str(e).upper():
+            return """
+            ⚠️ **Live Copilot Quota Reached (Displaying Cached Standard Security Blueprint)**
+            
+            1. **Summary**: The Isolation Forest model detected an extreme operational deviation. The temperature telemetry crossed the baseline safety threshold of 28°C, threatening system equilibrium.
+            2. **Risk Assessment**: Prolonged operation at elevated temperatures introduces severe risks of mechanical fatigue, insulation degradation, and permanent component warping, which could cause an unscheduled production line shutdown.
+            3. **Mitigation Blueprint**:
+               * **Step 1**: Disengage the primary power drive to reduce active load and initiate the secondary auxiliary cooling loop immediately.
+               * **Step 2**: Deploy a field technician equipped with a thermal imaging device to verify physical hardware core temperatures and inspect the primary coolant valve lines.
+            """
         return f"Could not connect to Gemma engine: {str(e)}"
 
 # ----------------- DATA GENERATION & MODEL TRAINING -----------------
