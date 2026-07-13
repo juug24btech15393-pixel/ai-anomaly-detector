@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from sklearn.ensemble import IsolationForest
 import json
 from datetime import datetime
-from groq import Groq
+from google import genai  # <-- Switched to Google's official SDK
 
 # Set page title and layout
 st.set_page_config(page_title="AI Industrial Anomaly Detector", layout="wide")
@@ -16,11 +16,12 @@ st.write("This dashboard normalizes AI anomaly alerts into the official **OCSF S
 # ----------------- LLM EXPLANATION FUNCTION -----------------
 def generate_gemma_report(ocsf_log_json):
     """Sends the OCSF log payload to Google Gemma to write an operations summary."""
-    if "GROQ_API_KEY" not in st.secrets:
-        return "⚠️ **Gemma Engine Paused**: Please add your GROQ_API_KEY to the Streamlit Secret Manager to enable live reporting."
+    if "GEMINI_API_KEY" not in st.secrets:
+        return "⚠️ **Gemma Engine Paused**: Please add your GEMINI_API_KEY to the Streamlit Secret Manager to enable live reporting."
         
     try:
-        client = Groq(api_key=st.secrets["GROQ_API_KEY"])
+        # Initialize Google GenAI client using secrets management
+        client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
         
         prompt = f"""
         You are an expert Industrial Cybersecurity Analyst. 
@@ -35,12 +36,12 @@ def generate_gemma_report(ocsf_log_json):
         Keep it direct, readable for non-coders, and concise.
         """
         
-        completion = client.chat.completions.create(
-            model="gemma-2-9b-it",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.2
+        # Calling Google's native gemma-2-9b-it model
+        response = client.models.generate_content(
+            model='gemma-2-9b-it',
+            contents=prompt,
         )
-        return completion.choices[0].message.content
+        return response.text
     except Exception as e:
         return f"Could not connect to Gemma engine: {str(e)}"
 
@@ -67,7 +68,7 @@ def train_model():
 ai_brain, df = train_model()
 
 # ----------------- SECTION 1: HISTORICAL DATA VIEW -----------------
-st.header("实时历史数据分析 | Historical Sensor Analysis")
+st.header("Historical Sensor Analysis")
 anomalies = df[df['AI_Guess'] == -1]
 
 fig, ax = plt.subplots(figsize=(12, 4))
