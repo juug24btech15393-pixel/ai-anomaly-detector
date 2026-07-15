@@ -61,23 +61,27 @@ def generate_gemma_report(ocsf_log_json):
 def train_model():
     timestamps = pd.date_range(start="2026-06-11 00:00", periods=1000, freq="min")
     np.random.seed(27)
-    temperature = 25 + np.random.normal(0, 1.5, size=1000)
     
-    # Inject historical spikes
+    # Generate stable baseline readings tightly centered around 25°C
+    temperature = 25 + np.random.normal(0, 0.8, size=1000)
+    
+    # 1. Inject historical HOT spikes (Abnormal)
     temperature[150:155] = 82.5
     temperature[500:506] = 79.1
     temperature[850:853] = 85.0
-
+    
+    # 2. Inject historical COLD drops (Abnormal)
+    temperature[300:304] = 5.2
+    temperature[700:705] = 8.0
+    
     df_history = pd.DataFrame({"Timestamp": timestamps, "Temperature_Celsius": temperature})
     
-    model = IsolationForest(contamination=0.015, random_state=42)
+    # We use a contamination rate of 2% to perfectly isolate the hot/cold spikes
+    model = IsolationForest(contamination=0.02, random_state=42)
     model.fit(df_history[['Temperature_Celsius']])
     df_history['AI_Guess'] = model.predict(df_history[['Temperature_Celsius']])
     
     return model, df_history
-
-ai_brain, df = train_model()
-
 # ----------------- SECTION 1: HISTORICAL DATA VIEW -----------------
 st.header("Historical Sensor Analysis")
 anomalies = df[df['AI_Guess'] == -1]
