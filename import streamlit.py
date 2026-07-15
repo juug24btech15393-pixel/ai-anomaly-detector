@@ -109,7 +109,8 @@ st.markdown("---")
 st.header("⚡ Live Testing & OCSF Log Generator")
 st.write("Drag the slider to alter physical device temperature values.")
 
-test_temp = st.slider("Current Machine Sensor Value (°C):", min_value=15.0, max_value=100.0, value=25.0, step=0.1)
+# Change min_value from 15.0 to 0.0
+test_temp = st.slider("Current Machine Sensor Value (°C):", min_value=0.0, max_value=100.0, value=25.0, step=0.1)
 
 # Ensure ai_brain is loaded before making a prediction
 if ai_brain is not None:
