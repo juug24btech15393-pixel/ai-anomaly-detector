@@ -84,16 +84,21 @@ def train_model():
     return model, df_history
 # ----------------- SECTION 1: HISTORICAL DATA VIEW -----------------
 st.header("Historical Sensor Analysis")
-anomalies = df[df['AI_Guess'] == -1]
 
-fig, ax = plt.subplots(figsize=(12, 4))
-ax.plot(df['Timestamp'], df['Temperature_Celsius'], color='black', label='Normal Reading', alpha=0.4)
-ax.scatter(anomalies['Timestamp'], anomalies['Temperature_Celsius'], color='red', label='AI Flagged Spikes', zorder=5)
-ax.set_title("Historical AI Training Logs")
-ax.set_ylabel("Temperature (°C)")
-ax.legend()
-ax.grid(True)
-st.pyplot(fig)
+# Ensure the brain and dataframe are fully loaded before running
+if 'df' in globals() and df is not None:
+    anomalies = df[df['AI_Guess'] == -1]
+
+    fig, ax = plt.subplots(figsize=(12, 4))
+    ax.plot(df['Timestamp'], df['Temperature_Celsius'], color='black', label='Normal Reading', alpha=0.4)
+    ax.scatter(anomalies['Timestamp'], anomalies['Temperature_Celsius'], color='red', label='AI Flagged Spikes', zorder=5)
+    ax.set_title("Historical AI Training Logs")
+    ax.set_ylabel("Temperature (°C)")
+    ax.legend()
+    ax.grid(True)
+    st.pyplot(fig)
+else:
+    st.warning("🔄 Training data is initializing. Please refresh the page in a moment.")
 
 # ----------------- SECTION 2: LIVE SIMULATION -----------------
 st.markdown("---")
