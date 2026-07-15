@@ -66,7 +66,7 @@ def train_model():
     temperature = 25 + np.random.normal(0, 0.8, size=1000)
     
     # 1. Inject historical HOT spikes
-    temperature[150:155] = 82.5
+    temperature[150:155] = 50.9
     temperature[500:506] = 79.1
     temperature[850:853] = 85.0
     
