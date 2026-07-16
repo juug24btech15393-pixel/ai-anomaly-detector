@@ -138,7 +138,7 @@ if ai_brain is not None:
 
     # --- UI INTERFACE DISPLAY: STATUS PANELS ---
     st.markdown("### 📊 Live Component Status")
-    col_status1, col_status2 = st.columns(2)
+    col_status1, col_status2, col_status3= st.columns(2)
     
     with col_status1:
         if is_temp_abnormal:
@@ -151,6 +151,9 @@ if ai_brain is not None:
             st.error(f"❌ Pressure is Abnormal: {test_pressure} Bar")
         else:
             st.success(f"🟢 Pressure is Normal: {test_pressure} Bar")
+    with col_status3:
+        if guess == -1:
+        st.error(f"⚠️ SIEM ALERT TRIGGERED! Abnormal Operational Telemetry: {test_temp}°C at {test_pressure} Bar")
 
     # ----------------- SECTION 2: DYNAMIC MOVING GRAPH LAYER -----------------
     st.markdown("---")
