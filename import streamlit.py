@@ -1,176 +1,265 @@
 import streamlit as st
-import random
-import time
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from sklearn.ensemble import IsolationForest
 import json
 from datetime import datetime
+from google import genai  # Official Google GenAI SDK
 
-# =========================================================================
-# SECTION 1: CORE ENGINE & MODEL INITIALIZATION
-# =========================================================================
+# Set page title and layout
+st.set_page_config(page_title="AI Industrial Multi-Sensor Dashboard", layout="wide")
 
-# Mocking the AI model loading logic
-# In your production code, replace this with your actual loaded Isolation Forest or pipeline model
-if "ai_brain" not in st.session_state:
-    st.session_state.ai_brain = "Loaded Anomaly Engine v1.0"
+st.title("🏭 AI Industrial Multi-Sensor Dashboard (OCSF & Google Gemma)")
+st.write("This dashboard leverages an unsupervised **Isolation Forest** to monitor both **Temperature and Pressure** simultaneously, auto-formats alerts into **OCSF JSON**, and drafts emergency response logs using **Gemma**.")
 
-ai_brain = st.session_state.ai_brain
-
-def generate_gemma_report(log_json_str):
-    """
-    Simulates Google Gemma parsing the OCSF log and generating a 
-    clean, human-readable industrial incident report summary.
-    """
+# ----------------- LLM EXPLANATION FUNCTION -----------------
+def generate_gemma_report(ocsf_log_json):
+    """Sends the OCSF log payload to Google Gemma to write an operations summary."""
+    if "GEMINI_API_KEY" not in st.secrets:
+        return "⚠️ **Gemma Engine Paused**: Please add your GEMINI_API_KEY to the Streamlit Secret Manager to enable live reporting."
+        
     try:
-        log_data = json.loads(log_json_str)
-        severity = log_data.get("severity", "Unknown")
-        title = log_data.get("finding_info", {}).get("title", "Metric Deviation")
-        metrics = log_data.get("resources", [])
+        # Initialize Google GenAI client using secrets management
+        client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
         
-        metric_summary = ", ".join([f"{m['type']} ({m['name']}) = {m['value']}" for m in metrics])
+        prompt = f"""
+        You are an expert Industrial Cybersecurity Analyst. 
+        Review this standardized OCSF (Open Cybersecurity Schema Framework) Detection Finding log tracking both temperature and pressure metrics:
+        {ocsf_log_json}
         
-        report = f"""
-        **🚨 GEMMA COPILOT AUTOMATED INCIDENT REPORT**
-        
-        * **Status:** Alert Generated via FactoryAI Engine
-        * **Classification:** {title}
-        * **Assigned Severity:** Level {log_data.get('severity_id', 3)} ({severity})
-        
-        **Analysis:**  
-        The automated monitoring pipeline captured telemetry violating standard runtime boundaries. 
-        Current metrics show: {metric_summary}. 
-        
-        **Recommended Action:**  
-        Inspect physical valves or heating elements immediately. Validate Modbus registry loops to rule out transient sensor calibration errors.
+        Write a brief, professional incident mitigation overview for factory operators.
+        Your response must include:
+        1. **Summary**: What happened based on the Temperature and Pressure metrics? Highlight if it's a dual-metric anomaly.
+        2. **Risk Assessment**: How this specific combo of anomalies impacts production safety.
+        3. **Mitigation Blueprint**: 2 steps the local engineering team should take immediately to vent pressure or cool the system.
+        Keep it direct, readable for non-coders, and concise.
         """
-        return report
+        
+        # Calling Google's native model
+        response = client.models.generate_content(
+            model='gemini-3.5-flash',
+            contents=prompt,
+        )
+        return response.text
     except Exception as e:
-        return f"Error parsing log data for Gemma report: {str(e)}"
+        # ---- GRACEFUL FALLBACK FOR 429 RATE LIMITS ----
+        if "429" in str(e) or "QUOTA" in str(e).upper():
+            return """
+            ⚠️ **Live Copilot Quota Reached (Displaying Cached Standard Security Blueprint)**
+            
+            1. **Summary**: The Isolation Forest model detected severe operational deviations. The telemetry indicates pressure and temperature metrics have breached standard safety limits.
+            2. **Risk Assessment**: High thermal activity paired with extreme fluid pressure introduces severe rupture risks, risking catastrophic structural failure of the transport line.
+            3. **Mitigation Blueprint**:
+               * **Step 1**: Actuate the primary pressure relief valve (PRV-01) to vent built-up line pressure immediately.
+               * **Step 2**: Shut down the primary heater core and isolate the pressure delivery manifold.
+            """
+        return f"Could not connect to Gemma engine: {str(e)}"
 
-# =========================================================================
-# SECTION 2: STREAMLIT UI SETUP & LIVE SIMULATION
-# =========================================================================
+# ----------------- DATA GENERATION & MODEL TRAINING -----------------
+@st.cache_resource
+def train_model():
+    timestamps = pd.date_range(start="2026-06-11 00:00", periods=1000, freq="min")
+    np.random.seed(27)
+    
+    # 1. Generate stable baselines
+    # Temperature (Normal tightly grouped around 25°C)
+    temperature = 25 + np.random.normal(0, 0.8, size=1000)
+    # Pressure (Normal tightly grouped around 10.0 Bar)
+    pressure = 10.0 + np.random.normal(0, 0.5, size=1000)
+    
+    # 2. Inject realistic anomalies (Spikes & Drops)
+    # Hot Temp + High Pressure Spikes
+    temperature[150:155] = 42.5
+    pressure[150:155] = 18.2
+    
+    # Extreme Pressure Spike Only
+    pressure[500:506] = 22.1
+    
+    # Cold Temp + Low Pressure Drops
+    temperature[850:853] = 12.0
+    pressure[850:853] = 3.1
+    
+    df_history = pd.DataFrame({
+        "Timestamp": timestamps, 
+        "Temperature_Celsius": temperature,
+        "Pressure_Bar": pressure
+    })
+    
+    # Train the Isolation Forest on BOTH features simultaneously for 2D classification
+    model = IsolationForest(contamination=0.04, random_state=42)
+    model.fit(df_history[['Temperature_Celsius', 'Pressure_Bar']])
+    df_history['AI_Guess'] = model.predict(df_history[['Temperature_Celsius', 'Pressure_Bar']])
+    
+    return model, df_history
 
-st.set_page_config(page_title="Industrial Anomaly Dashboard", layout="wide")
+# Initialize our variables at startup so they are always defined!
+ai_brain, df = train_model()
 
-st.title("🏭 Automated Industrial Anomaly Detection Dashboard")
-st.write("This application monitors real-time operational telemetry and structures anomalies into normalized OCSF logs.")
+# ----------------- SECTION 1: HISTORICAL DATA VIEW -----------------
+st.header("Historical Multi-Sensor Analysis")
 
+# Double safety check: run if variables exist
+if ai_brain is not None and df is not None:
+    anomalies = df[df['AI_Guess'] == -1]
+
+    # Create two subplots side-by-side sharing the time scale axis
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 6), sharex=True)
+    
+    # Subplot 1: Temperature Metrics
+    ax1.plot(df['Timestamp'], df['Temperature_Celsius'], color='black', label='Normal Temp', alpha=0.4)
+    ax1.scatter(anomalies['Timestamp'], anomalies['Temperature_Celsius'], color='red', label='AI Flagged Anomaly', zorder=5)
+    ax1.set_ylabel("Temperature (°C)")
+    ax1.legend(loc="upper right")
+    ax1.grid(True)
+    ax1.set_title("Historical AI Multi-Sensor Logs")
+
+    # Subplot 2: Pressure Metrics
+    ax2.plot(df['Timestamp'], df['Pressure_Bar'], color='blue', label='Normal Pressure', alpha=0.4)
+    ax2.scatter(anomalies['Timestamp'], anomalies['Pressure_Bar'], color='red', label='AI Flagged Anomaly', zorder=5)
+    ax2.set_ylabel("Pressure (Bar)")
+    ax2.legend(loc="upper right")
+    ax2.grid(True)
+    
+    st.pyplot(fig)
+else:
+    st.warning("🔄 Training data is initializing. Please refresh the page in a moment.")
+
+# ----------------- SECTION 2: LIVE SIMULATION -----------------
 st.markdown("---")
-st.header("⚡ Live Industrial Sensor Stream")
-st.write("Toggle the live feed to simulate real-time Modbus/MQTT hardware data collection.")
+st.header("⚡ Live Testing & OCSF Log Generator")
+st.write("Drag the sliders to alter physical equipment telemetry values in real-time.")
 
-# 1. Add an activation switch for the automatic stream
-auto_stream = st.checkbox("📡 Connect to Live Machine Data Feed", value=False)
+col_slide1, col_slide2 = st.columns(2)
+with col_slide1:
+    test_temp = st.slider("Current Machine Sensor Value (°C):", min_value=0.0, max_value=100.0, value=25.0, step=0.1)
+with col_slide2:
+    test_pressure = st.slider("Current Machine Pressure Value (Bar):", min_value=0.0, max_value=30.0, value=10.0, step=0.1)
 
-# Use Streamlit's session state to persist values across quick automatic reruns
-if "sim_temp" not in st.session_state:
-    st.session_state.sim_temp = 25.0
-if "sim_pressure" not in st.session_state:
-    st.session_state.sim_pressure = 10.0
-
-if auto_stream:
-    # 2. Simulate live industrial fluctuations
-    # Introduce random minor ambient drift (normal behavior)
-    temp_drift = random.uniform(-0.5, 0.5)
-    press_drift = random.uniform(-0.2, 0.2)
+# Ensure ai_brain is loaded before making a prediction
+if ai_brain is not None:
+    # 1. Run the AI prediction to see if the overall system detects an anomaly
+    guess = ai_brain.predict([[test_temp, test_pressure]])[0]
     
-    st.session_state.sim_temp = round(st.session_state.sim_temp + temp_drift, 1)
-    st.session_state.sim_pressure = round(st.session_state.sim_pressure + press_drift, 1)
+    # 2. Define our hard thresholds to determine WHICH metric is causing the issue
+    # Normal temp baseline is ~25°C, normal pressure is ~10 Bar
+    is_temp_abnormal = test_temp < 20.0 or test_temp > 32.0
+    is_pressure_abnormal = test_pressure < 8.0 or test_pressure > 14.0
+
+    st.markdown("### 📊 Live Component Status")
+    col_status1, col_status2 = st.columns(2)
     
-    # Keep normal values bounded so they don't drift to infinity
-    st.session_state.sim_temp = max(22.0, min(st.session_state.sim_temp, 28.0))
-    st.session_state.sim_pressure = max(9.0, min(st.session_state.sim_pressure, 11.0))
-    
-    # 3. Inject an occasional mechanical anomaly (10% chance) to test red/green logic
-    if random.random() < 0.10:
-        anomaly_type = random.choice(["high_pressure", "low_pressure", "dual_spike"])
-        if anomaly_type == "high_pressure":
-            st.session_state.sim_pressure = round(random.uniform(18.0, 24.0), 1)  # Mechanical blockage
-        elif anomaly_type == "low_pressure":
-            st.session_state.sim_pressure = round(random.uniform(2.0, 5.0), 1)    # System leak
-        elif anomaly_type == "dual_spike":
-            st.session_state.sim_temp = round(random.uniform(35.0, 45.0), 1)
-            st.session_state.sim_pressure = round(random.uniform(20.0, 26.0), 1)
+    # --- TEMPERATURE INDEPENDENT ALERTS ---
+    with col_status1:
+        if is_temp_abnormal:
+            st.error(f"❌ Temperature is Abnormal: {test_temp}°C")
+        else:
+            st.success(f"🟢 Temperature is Normal: {test_temp}°C")
+            
+    # --- PRESSURE INDEPENDENT ALERTS ---
+    with col_status2:
+        if is_pressure_abnormal:
+            st.error(f"❌ Pressure is Abnormal: {test_pressure} Bar")
+        else:
+            st.success(f"🟢 Pressure is Normal: {test_pressure} Bar")
 
-current_temp = st.session_state.sim_temp
-current_pressure = st.session_state.sim_pressure
+    # 3. If either metric is broken, the AI triggers the backend OCSF log generation
+    if guess == -1 or is_temp_abnormal or is_pressure_abnormal:
+        # Determine appropriate severity tier based on the split conditions
+        if is_temp_abnormal and is_pressure_abnormal:
+            severity_label = "Critical"
+            severity_num = 5
+            finding_title = "Multivariate Sensor Anomaly Detected"
+        else:
+            severity_label = "Major"
+            severity_num = 4
+            finding_title = f"Single-Metric {'Temperature' if is_temp_abnormal else 'Pressure'} Deviation"
 
-# Display static metric status info banner
-st.info(f"📡 Data Feed Status: {'ACTIVE - Streaming Telemetry' if auto_stream else 'PAUSED'}")
-
-# =========================================================================
-# SECTION 3: METRIC EVALUATION & VISUAL ALERTS
-# =========================================================================
-
-# Evaluate alerts using the separate component threshold rules
-is_temp_abnormal = current_temp < 20.0 or current_temp > 32.0
-is_pressure_abnormal = current_pressure < 8.0 or current_pressure > 14.0
-
-st.markdown("### 📊 Live Component Status")
-col_status1, col_status2 = st.columns(2)
-
-with col_status1:
-    if is_temp_abnormal:
-        st.error(f"❌ Temperature is Abnormal: {current_temp}°C")
-    else:
-        st.success(f"🟢 Temperature is Normal: {current_temp}°C")
+        # Calculate local timestamp adjusted for India Standard Time (IST)
+        local_timestamp = int(datetime.now().timestamp()) + 19800
         
-with col_status2:
-    if is_pressure_abnormal:
-        st.error(f"❌ Pressure is Abnormal: {current_pressure} Bar")
-    else:
-        st.success(f"🟢 Pressure is Normal: {current_pressure} Bar")
-
-# =========================================================================
-# SECTION 4: OCSF LOGGING & GENMA AI CO-PILOT PIPELINE
-# =========================================================================
-
-# 5. Process OCSF and Gemma Logs if any anomaly occurs
-if ai_brain is not None and (is_temp_abnormal or is_pressure_abnormal):
-    if is_temp_abnormal and is_pressure_abnormal:
-        severity_label, severity_num = "Critical", 5
-        finding_title = "Multivariate Sensor Anomaly Detected"
-    else:
-        severity_label, severity_num = "Major", 4
-        finding_title = f"Single-Metric {'Temperature' if is_temp_abnormal else 'Pressure'} Deviation"
-
-    # Add localized timestamp offset if needed (e.g., IST +5:30 -> 19800 seconds)
-    local_timestamp = int(datetime.now().timestamp())
-    
-    ocsf_log = {
-        "metadata": {
-            "version": "1.3.0",
-            "product": {"vendor": "FactoryAI", "name": "Multi-Sensor Anomaly Engine", "version": "1.0.0"}
-        },
-        "time": local_timestamp,
-        "class_uid": 2004,
-        "class_name": "Detection Finding",
-        "severity_id": severity_num, 
-        "severity": severity_label,
-        "finding_info": {"title": finding_title, "desc": "Automated pipeline captured out-of-bounds metrics."},
-        "resources": [
-            {"type": "Machine Metric", "name": "Temperature_Celsius", "value": str(current_temp)},
-            {"type": "Machine Metric", "name": "Pressure_Bar", "value": str(current_pressure)}
-        ]
-    }
-    
-    st.markdown("---")
-    col_json, col_copilot = st.columns(2)
-    
-    with col_json:
-        st.subheader("📋 Normalized OCSF JSON")
-        st.json(ocsf_log)
+        ocsf_log = {
+            "metadata": {
+                "version": "1.3.0",
+                "product": {"vendor": "FactoryAI", "name": "Multi-Sensor Anomaly Engine", "version": "1.0.0"}
+            },
+            "time": local_timestamp,
+            "class_uid": 2004,
+            "class_name": "Detection Finding",
+            "category_uid": 2,
+            "category_name": "Findings",
+            "activity_id": 1, 
+            "severity_id": severity_num, 
+            "severity": severity_label,
+            "finding_info": {
+                "title": finding_title,
+                "uid": f"ALERT-{local_timestamp}",
+                "desc": "Isolation Forest flagged abnormal industrial hardware activity.",
+                "analytic": {"name": "IsolationForest_2D_Model", "type": "Unsupervised Multi-Variable"}
+            },
+            "device": {"name": "Factory_Sensor_01", "type": "Industrial Sensor Unit", "type_id": 1},
+            "resources": [
+                {"type": "Machine Metric", "name": "Temperature_Celsius", "value": str(round(test_temp, 2))},
+                {"type": "Machine Metric", "name": "Pressure_Bar", "value": str(round(test_pressure, 2))}
+            ]
+        }
         
-    with col_copilot:
-        st.subheader("🤖 Google Gemma Co-Pilot Summary")
-        report = generate_gemma_report(json.dumps(ocsf_log))
-        st.markdown(report)
+        st.markdown("---")
+        col_json, col_copilot = st.columns(2)
+        
+        with col_json:
+            st.subheader("📋 Normalized OCSF JSON Structure")
+            st.json(ocsf_log)
+            
+        with col_copilot:
+            st.subheader("🤖 Google Gemma Co-Pilot Summary")
+            with st.spinner("Gemma is decoding the OCSF schema..."):
+                log_string = json.dumps(ocsf_log, indent=2)
+                report = generate_gemma_report(log_string)
+                st.markdown(report)
+                
+            # ---- INTERACTIVE CO-PILOT CHAT ASSISTANT ----
+            st.markdown("---")
+            st.markdown("### 💬 Ask Co-Pilot Follow-Up Questions")
+            user_question = st.text_input(
+                "Ask anything about this incident (e.g., 'What safety gear do I need?'):", 
+                key="incident_qa"
+            )
 
-# =========================================================================
-# SECTION 5: STREAMLIT AUTOMATIC RERUN LOOP
-# =========================================================================
-
-# 6. Infinite loop trigger to force Streamlit to refresh the UI automatically every second
-if auto_stream:
-    time.sleep(1)
-    st.rerun()
+            if user_question:
+                if "GEMINI_API_KEY" in st.secrets:
+                    try:
+                        client_chat = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+                        
+                        chat_prompt = f"""
+                        Context Log: {log_string}
+                        
+                        User Question: {user_question}
+                        
+                        Answer the user's question accurately. Use the current temperature ({test_temp}°C) and pressure ({test_pressure} Bar) anomalies to provide specific context. Keep it concise.
+                        """
+                        
+                        with st.spinner("Gemini is thinking..."):
+                            chat_response = client_chat.models.generate_content(
+                                model='gemini-3.5-flash',
+                                contents=chat_prompt,
+                            )
+                            st.info(chat_response.text)
+                    except Exception as e:
+                        # ---- GRACEFUL CHAT FALLBACK FOR 429 RATE LIMITS ----
+                        if "429" in str(e) or "QUOTA" in str(e).upper():
+                            q_lower = user_question.lower()
+                            if "gear" in q_lower or "safety" in q_lower or "ppe" in q_lower:
+                                st.info("🤖 **Co-Pilot (Offline Mode):** For combined thermal and high-pressure threats, operators require Class 2 high-temp insulative gloves, safety goggles, a clear blast shield, and steel-toe boots before approaching `Factory_Sensor_01`.")
+                            elif "valve" in q_lower or "coolant" in q_lower or "cause" in q_lower:
+                                st.info("🤖 **Co-Pilot (Offline Mode):** This abnormal operational profile typically points to a mechanical valve failure, pressure regulator lockup, or a sudden line blockage downstream.")
+                            else:
+                                st.info(f"🤖 **Co-Pilot (Offline Mode):** The live AI engine is currently on a brief rate-limit cooldown. Regarding your query ('{user_question}'): Standard operating safety protocols dictate isolating the fluid line, closing the inlet manifold feed, and engaging the secondary loop radiator pumps.")
+                        else:
+                            st.error(f"Chat Error: {str(e)}")
+                else:
+                    st.warning("Please configure your API Key to use the interactive chat box.")
+    else:
+        st.success(f"🟢 System Telemetry Stable: Temperature ({test_temp}°C) and Pressure ({test_pressure} Bar) operate safely within standard deviation limits.")
+else:
+    st.info("🔄 Running training sequence. Please interact with the slider bars again.")
