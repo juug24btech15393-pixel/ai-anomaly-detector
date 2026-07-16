@@ -4,7 +4,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from sklearn.ensemble import IsolationForest
 import json
-from datetime import datetime
+import random
+from datetime import datetime, timedelta
 from google import genai  # Official Google GenAI SDK
 
 # Set page title and layout
@@ -36,14 +37,12 @@ def generate_gemma_report(ocsf_log_json):
         Keep it direct, readable for non-coders, and concise.
         """
         
-        # Calling Google's native model
         response = client.models.generate_content(
             model='gemini-3.5-flash',
             contents=prompt,
         )
         return response.text
     except Exception as e:
-        # ---- GRACEFUL FALLBACK FOR 429 RATE LIMITS ----
         if "429" in str(e) or "QUOTA" in str(e).upper():
             return """
             ⚠️ **Live Copilot Quota Reached (Displaying Cached Standard Security Blueprint)**
@@ -59,15 +58,12 @@ def generate_gemma_report(ocsf_log_json):
 # ----------------- DATA GENERATION & MODEL TRAINING -----------------
 @st.cache_resource
 def train_model():
-    # Base training dataset (Historical baseline standard layout)
     timestamps = pd.date_range(start="2026-06-11 00:00", periods=1000, freq="min")
     np.random.seed(27)
     
-    # Generate baseline normal metrics
     temperature = 25 + np.random.normal(0, 0.8, size=1000)
     pressure = 10.0 + np.random.normal(0, 0.5, size=1000)
     
-    # Inject historical anomalies
     temperature[150:155] = 42.5
     pressure[150:155] = 18.2
     pressure[500:506] = 22.1
@@ -82,20 +78,18 @@ def train_model():
     
     model = IsolationForest(contamination=0.04, random_state=42)
     model.fit(df_history[['Temperature_Celsius', 'Pressure_Bar']])
-    
     return model
 
-# Train model once and cache it
 ai_brain = train_model()
 
 # ----------------- SESSION STATE MOVING DATA WINDOW -----------------
-# We create a dynamic buffer of the last 30 readings to show a moving graph layout
+# Keep track of a rolling timeline buffer
 if "moving_history" not in st.session_state:
     np.random.seed(42)
     init_temps = list(25.0 + np.random.normal(0, 0.5, size=30))
     init_press = list(10.0 + np.random.normal(0, 0.3, size=30))
-    init_times = list(pd.date_range(end=datetime.now(), periods=30, freq="min"))
-    init_guesses = [1] * 30 # Initialize as normal baseline
+    init_times = [datetime.now() - timedelta(minutes=i) for i in range(30, 0, -1)]
+    init_guesses = [1] * 30 
     
     st.session_state.moving_history = pd.DataFrame({
         "Timestamp": init_times,
@@ -106,23 +100,56 @@ if "moving_history" not in st.session_state:
 
 # ----------------- SECTION 1: LIVE INTERACTIVE CONTROL -----------------
 st.header("⚡ Live Testing & OCSF Log Generator")
-st.write("Drag the sliders to alter physical equipment telemetry values. **The historical graphs below will shift forward with your new readings!**")
+st.write("Set your baseline target using the sliders below, then trigger data pulses to advance the rolling timeline graph.")
 
 col_slide1, col_slide2 = st.columns(2)
 with col_slide1:
-    test_temp = st.slider("Current Machine Sensor Value (°C):", min_value=0.0, max_value=100.0, value=25.0, step=0.1)
+    slider_temp = st.slider("Target Baseline Temperature (°C):", min_value=0.0, max_value=100.0, value=25.0, step=0.1)
 with col_slide2:
-    test_pressure = st.slider("Current Machine Pressure Value (Bar):", min_value=0.0, max_value=30.0, value=10.0, step=0.1)
+    slider_pressure = st.slider("Target Baseline Pressure (Bar):", min_value=0.0, max_value=30.0, value=10.0, step=0.1)
 
-# Run current prediction
+# --- ACTION TRIGGER ENGINE ---
+st.markdown("### 🕹️ Telemetry Flow Controls")
+col_btn1, col_btn2, col_btn3 = st.columns(3)
+
+# Initialize calculation defaults based on the slider state
+test_temp = slider_temp
+test_pressure = slider_pressure
+
+with col_btn1:
+    if st.button("📈 Pulse Next Telemetry Reading (Normal Drift)", use_container_width=True):
+        # Inject realistic minor ambient field drift
+        test_temp = round(slider_temp + random.uniform(-0.6, 0.6), 1)
+        test_pressure = round(slider_pressure + random.uniform(-0.3, 0.3), 1)
+
+with col_btn2:
+    if st.button("🚨 Inject Sudden Extreme Hardware Anomaly", use_container_width=True):
+        # Overwrite values with sudden dangerous operational spikes
+        anomaly_scenario = random.choice(["high_pressure", "critical_temp", "dual_system_failure"])
+        if anomaly_scenario == "high_pressure":
+            test_temp = round(slider_temp + random.uniform(-0.5, 0.5), 1)
+            test_pressure = round(random.uniform(19.0, 25.0), 1)
+        elif anomaly_scenario == "critical_temp":
+            test_temp = round(random.uniform(36.0, 48.0), 1)
+            test_pressure = round(slider_pressure + random.uniform(-0.2, 0.2), 1)
+        elif anomaly_scenario == "dual_system_failure":
+            test_temp = round(random.uniform(38.0, 45.0), 1)
+            test_pressure = round(random.uniform(20.0, 26.0), 1)
+
+with col_btn3:
+    if st.button("🔄 Clear Real-Time Rolling Data Buffers", use_container_width=True):
+        del st.session_state.moving_history
+        st.rerun()
+
+# Run the inference engine evaluation
 if ai_brain is not None:
     current_guess = ai_brain.predict([[test_temp, test_pressure]])[0]
     
-    # Threshold rules for component color boxes
+    # Establish rule boundaries for local block flags
     is_temp_abnormal = test_temp < 20.0 or test_temp > 32.0
     is_pressure_abnormal = test_pressure < 8.0 or test_pressure > 14.0
 
-    # Append the new user-controlled data tick to our moving timeline history dataframe
+    # Append our calculated metrics context frame directly to our persistent state history matrix
     new_tick = pd.DataFrame({
         "Timestamp": [datetime.now()],
         "Temperature_Celsius": [test_temp],
@@ -130,14 +157,14 @@ if ai_brain is not None:
         "AI_Guess": [current_guess]
     })
     
-    # Update the moving window matrix, dropping the oldest record so it rolls forward
     updated_history = pd.concat([st.session_state.moving_history, new_tick], ignore_index=True)
-    if len(updated_history) > 40:  # Bound the window view size
+    if len(updated_history) > 35:  
         updated_history = updated_history.iloc[1:]
     st.session_state.moving_history = updated_history
 
     # --- UI INTERFACE DISPLAY: STATUS PANELS ---
     st.markdown("### 📊 Live Component Status")
+    st.caption(f"Showing updated reading: **{test_temp}°C** | **{test_pressure} Bar**")
     col_status1, col_status2 = st.columns(2)
     
     with col_status1:
@@ -155,26 +182,26 @@ if ai_brain is not None:
     # ----------------- SECTION 2: DYNAMIC MOVING GRAPH LAYER -----------------
     st.markdown("---")
     st.header("📉 Real-Time Rolling Sensor Tracking")
-    st.write("This dynamic graph renders the moving window timeline of your adjustments. Watch the red marker classify metrics live.")
+    st.write("Watch the history lines update dynamically. Red anomaly icons populate instantly whenever values breach standard safety zones.")
 
     df_move = st.session_state.moving_history
     move_anomalies = df_move[df_move['AI_Guess'] == -1]
 
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 5), sharex=True)
     
-    # Subplot 1: Dynamic Rolling Temperature
+    # Subplot 1: Temperature Rolling Window Trace
     ax1.plot(df_move['Timestamp'], df_move['Temperature_Celsius'], color='black', label='Temp Path', alpha=0.5, marker='o', markersize=3)
     if not move_anomalies.empty:
-        ax1.scatter(move_anomalies['Timestamp'], move_anomalies['Temperature_Celsius'], color='red', s=60, label='AI Flagged Anomaly', zorder=5)
+        ax1.scatter(move_anomalies['Timestamp'], move_anomalies['Temperature_Celsius'], color='red', s=70, label='AI Flagged Anomaly', zorder=5)
     ax1.set_ylabel("Temperature (°C)")
     ax1.legend(loc="upper left")
     ax1.grid(True, linestyle="--", alpha=0.6)
     ax1.set_title("Rolling 2D Isolation Forest Classification Vector")
 
-    # Subplot 2: Dynamic Rolling Pressure
+    # Subplot 2: Pressure Rolling Window Trace
     ax2.plot(df_move['Timestamp'], df_move['Pressure_Bar'], color='blue', label='Pressure Path', alpha=0.5, marker='o', markersize=3)
     if not move_anomalies.empty:
-        ax2.scatter(move_anomalies['Timestamp'], move_anomalies['Pressure_Bar'], color='red', s=60, label='AI Flagged Anomaly', zorder=5)
+        ax2.scatter(move_anomalies['Timestamp'], move_anomalies['Pressure_Bar'], color='red', s=70, label='AI Flagged Anomaly', zorder=5)
     ax2.set_ylabel("Pressure (Bar)")
     ax2.legend(loc="upper left")
     ax2.grid(True, linestyle="--", alpha=0.6)
