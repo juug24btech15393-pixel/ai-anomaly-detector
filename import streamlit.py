@@ -138,16 +138,46 @@ with col_slide2:
 
 # Ensure ai_brain is loaded before making a prediction
 if ai_brain is not None:
-    # Pass BOTH dynamic values into the 2D feature matrix array
+    # 1. Run the AI prediction to see if the overall system detects an anomaly
     guess = ai_brain.predict([[test_temp, test_pressure]])[0]
+    
+    # 2. Define our hard thresholds to determine WHICH metric is causing the issue
+    # Normal temp baseline is ~25°C, normal pressure is ~10 Bar
+    is_temp_abnormal = test_temp < 20.0 or test_temp > 32.0
+    is_pressure_abnormal = test_pressure < 8.0 or test_pressure > 14.0
 
-    if guess == -1:
-        st.error(f"⚠️ SIEM ALERT TRIGGERED! Abnormal Operational Telemetry: {test_temp}°C at {test_pressure} Bar")
-        
-        # Calculate local timestamp adjusted for India Standard Time (IST: UTC + 5h 30m)
+    st.markdown("### 📊 Live Component Status")
+    col_status1, col_status2 = st.columns(2)
+    
+    # --- TEMPERATURE INDEPENDENT ALERTS ---
+    with col_status1:
+        if is_temp_abnormal:
+            st.error(f"❌ Temperature is Abnormal: {test_temp}°C")
+        else:
+            st.success(f"🟢 Temperature is Normal: {test_temp}°C")
+            
+    # --- PRESSURE INDEPENDENT ALERTS ---
+    with col_status2:
+        if is_pressure_abnormal:
+            st.error(f"❌ Pressure is Abnormal: {test_pressure} Bar")
+        else:
+            st.success(f"🟢 Pressure is Normal: {test_pressure} Bar")
+
+    # 3. If either metric is broken, the AI triggers the backend OCSF log generation
+    if guess == -1 or is_temp_abnormal or is_pressure_abnormal:
+        # Determine appropriate severity tier based on the split conditions
+        if is_temp_abnormal and is_pressure_abnormal:
+            severity_label = "Critical"
+            severity_num = 5
+            finding_title = "Multivariate Sensor Anomaly Detected"
+        else:
+            severity_label = "Major"
+            severity_num = 4
+            finding_title = f"Single-Metric {'Temperature' if is_temp_abnormal else 'Pressure'} Deviation"
+
+        # Calculate local timestamp adjusted for India Standard Time (IST)
         local_timestamp = int(datetime.now().timestamp()) + 19800
         
-        # Standardized Open Cybersecurity Schema Framework Object reflecting multiple resources
         ocsf_log = {
             "metadata": {
                 "version": "1.3.0",
@@ -159,12 +189,12 @@ if ai_brain is not None:
             "category_uid": 2,
             "category_name": "Findings",
             "activity_id": 1, 
-            "severity_id": 5, 
-            "severity": "Critical",
+            "severity_id": severity_num, 
+            "severity": severity_label,
             "finding_info": {
-                "title": "Multivariate Sensor Anomaly Detected",
+                "title": finding_title,
                 "uid": f"ALERT-{local_timestamp}",
-                "desc": "Isolation Forest flagged abnormal industrial hardware thermal and/or pressure activity.",
+                "desc": "Isolation Forest flagged abnormal industrial hardware activity.",
                 "analytic": {"name": "IsolationForest_2D_Model", "type": "Unsupervised Multi-Variable"}
             },
             "device": {"name": "Factory_Sensor_01", "type": "Industrial Sensor Unit", "type_id": 1},
@@ -174,13 +204,14 @@ if ai_brain is not None:
             ]
         }
         
-        col1, col2 = st.columns(2)
+        st.markdown("---")
+        col_json, col_copilot = st.columns(2)
         
-        with col1:
+        with col_json:
             st.subheader("📋 Normalized OCSF JSON Structure")
             st.json(ocsf_log)
             
-        with col2:
+        with col_copilot:
             st.subheader("🤖 Google Gemma Co-Pilot Summary")
             with st.spinner("Gemma is decoding the OCSF schema..."):
                 log_string = json.dumps(ocsf_log, indent=2)
