@@ -136,24 +136,28 @@ if ai_brain is not None:
         updated_history = updated_history.iloc[1:]
     st.session_state.moving_history = updated_history
 
-    # --- UI INTERFACE DISPLAY: STATUS PANELS ---
-    st.markdown("### 📊 Live Component Status")
-    col_status1, col_status2, col_status3= st.columns(2)
-    
-    with col_status1:
-        if is_temp_abnormal:
-            st.error(f"❌ Temperature is Abnormal: {test_temp}°C")
-        else:
-            st.success(f"🟢 Temperature is Normal: {test_temp}°C")
-            
-    with col_status2:
-        if is_pressure_abnormal:
-            st.error(f"❌ Pressure is Abnormal: {test_pressure} Bar")
-        else:
-            st.success(f"🟢 Pressure is Normal: {test_pressure} Bar")
-    with col_status3:
-        if guess == -1:
+  st.markdown("### 📊 Live Component Status")
+# 1. Fixed: Changed st.columns(2) to st.columns(3) to prevent unpacking errors
+col_status1, col_status2, col_status3 = st.columns(3)
+
+with col_status1:
+    if is_temp_abnormal:
+        st.error(f"❌ Temperature is Abnormal: {test_temp}°C")
+    else:
+        st.success(f"🟢 Temperature is Normal: {test_temp}°C")
+        
+with col_status2:
+    if is_pressure_abnormal:
+        st.error(f"❌ Pressure is Abnormal: {test_pressure} Bar")
+    else:
+        st.success(f"🟢 Pressure is Normal: {test_pressure} Bar")
+
+with col_status3:
+    # 2. Fixed: Indented the st.error block properly under the if statement
+    if current_guess == -1:
         st.error(f"⚠️ SIEM ALERT TRIGGERED! Abnormal Operational Telemetry: {test_temp}°C at {test_pressure} Bar")
+    else:
+        st.success("🟢 AI Model Vector: Stable")
 
     # ----------------- SECTION 2: DYNAMIC MOVING GRAPH LAYER -----------------
     st.markdown("---")
