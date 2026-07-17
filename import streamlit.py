@@ -59,18 +59,24 @@ def generate_gemma_report(ocsf_log_json):
 # ----------------- DATA GENERATION & MODEL TRAINING -----------------
 @st.cache_resource
 def train_model():
-    # Base training dataset (Historical baseline standard layout)
     timestamps = pd.date_range(start="2026-06-11 00:00", periods=1000, freq="min")
     np.random.seed(27)
     
-    # Generate baseline normal metrics
+    # 1. Generate stable baselines
+    # Temperature (Normal tightly grouped around 25°C)
     temperature = 25 + np.random.normal(0, 0.8, size=1000)
+    # Pressure (Normal tightly grouped around 10.0 Bar)
     pressure = 10.0 + np.random.normal(0, 0.5, size=1000)
     
-    # Inject historical anomalies
+    # 2. Inject realistic anomalies (Spikes & Drops)
+    # Hot Temp + High Pressure Spikes
     temperature[150:155] = 42.5
     pressure[150:155] = 18.2
+    
+    # Extreme Pressure Spike Only
     pressure[500:506] = 22.1
+    
+    # Cold Temp + Low Pressure Drops
     temperature[850:853] = 12.0
     pressure[850:853] = 3.1
     
@@ -80,33 +86,49 @@ def train_model():
         "Pressure_Bar": pressure
     })
     
+    # Train the Isolation Forest on BOTH features simultaneously for 2D classification
     model = IsolationForest(contamination=0.04, random_state=42)
     model.fit(df_history[['Temperature_Celsius', 'Pressure_Bar']])
+    df_history['AI_Guess'] = model.predict(df_history[['Temperature_Celsius', 'Pressure_Bar']])
     
-    return model
+    return model, df_history
 
-# Train model once and cache it
-ai_brain = train_model()
+# Initialize our variables at startup so they are always defined!
+ai_brain, df = train_model()
 
-# ----------------- SESSION STATE MOVING DATA WINDOW -----------------
-# We create a dynamic buffer of the last 30 readings to show a moving graph layout
-if "moving_history" not in st.session_state:
-    np.random.seed(42)
-    init_temps = list(25.0 + np.random.normal(0, 0.5, size=30))
-    init_press = list(10.0 + np.random.normal(0, 0.3, size=30))
-    init_times = list(pd.date_range(end=datetime.now(), periods=30, freq="min"))
-    init_guesses = [1] * 30 # Initialize as normal baseline
+# ----------------- SECTION 1: HISTORICAL DATA VIEW -----------------
+st.header("Historical Multi-Sensor Analysis")
+
+# Double safety check: run if variables exist
+if ai_brain is not None and df is not None:
+    anomalies = df[df['AI_Guess'] == -1]
+
+    # Create two subplots side-by-side sharing the time scale axis
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 6), sharex=True)
     
-    st.session_state.moving_history = pd.DataFrame({
-        "Timestamp": init_times,
-        "Temperature_Celsius": init_temps,
-        "Pressure_Bar": init_press,
-        "AI_Guess": init_guesses
-    })
+    # Subplot 1: Temperature Metrics
+    ax1.plot(df['Timestamp'], df['Temperature_Celsius'], color='black', label='Normal Temp', alpha=0.4)
+    ax1.scatter(anomalies['Timestamp'], anomalies['Temperature_Celsius'], color='red', label='AI Flagged Anomaly', zorder=5)
+    ax1.set_ylabel("Temperature (°C)")
+    ax1.legend(loc="upper right")
+    ax1.grid(True)
+    ax1.set_title("Historical AI Multi-Sensor Logs")
 
-# ----------------- SECTION 1: LIVE INTERACTIVE CONTROL -----------------
+    # Subplot 2: Pressure Metrics
+    ax2.plot(df['Timestamp'], df['Pressure_Bar'], color='blue', label='Normal Pressure', alpha=0.4)
+    ax2.scatter(anomalies['Timestamp'], anomalies['Pressure_Bar'], color='red', label='AI Flagged Anomaly', zorder=5)
+    ax2.set_ylabel("Pressure (Bar)")
+    ax2.legend(loc="upper right")
+    ax2.grid(True)
+    
+    st.pyplot(fig)
+else:
+    st.warning("🔄 Training data is initializing. Please refresh the page in a moment.")
+
+# ----------------- SECTION 2: LIVE SIMULATION -----------------
+st.markdown("---")
 st.header("⚡ Live Testing & OCSF Log Generator")
-st.write("Drag the sliders to alter physical equipment telemetry values. **The historical graphs below will shift forward with your new readings!**")
+st.write("Drag the sliders to alter physical equipment telemetry values in real-time.")
 
 col_slide1, col_slide2 = st.columns(2)
 with col_slide1:
@@ -114,81 +136,36 @@ with col_slide1:
 with col_slide2:
     test_pressure = st.slider("Current Machine Pressure Value (Bar):", min_value=0.0, max_value=30.0, value=10.0, step=0.1)
 
-# Run current prediction
+# Ensure ai_brain is loaded before making a prediction
 if ai_brain is not None:
-    current_guess = ai_brain.predict([[test_temp, test_pressure]])[0]
+    # 1. Run the AI prediction to see if the overall system detects an anomaly
+    guess = ai_brain.predict([[test_temp, test_pressure]])[0]
     
-    # Threshold rules for component color boxes
+    # 2. Define our hard thresholds to determine WHICH metric is causing the issue
+    # Normal temp baseline is ~25°C, normal pressure is ~10 Bar
     is_temp_abnormal = test_temp < 20.0 or test_temp > 32.0
     is_pressure_abnormal = test_pressure < 8.0 or test_pressure > 14.0
 
-    # Append the new user-controlled data tick to our moving timeline history dataframe
-    new_tick = pd.DataFrame({
-        "Timestamp": [datetime.now()],
-        "Temperature_Celsius": [test_temp],
-        "Pressure_Bar": [test_pressure],
-        "AI_Guess": [current_guess]
-    })
+    st.markdown("### 📊 Live Component Status")
+    col_status1, col_status2 = st.columns(2)
     
-    # Update the moving window matrix, dropping the oldest record so it rolls forward
-    updated_history = pd.concat([st.session_state.moving_history, new_tick], ignore_index=True)
-    if len(updated_history) > 40:  # Bound the window view size
-        updated_history = updated_history.iloc[1:]
-    st.session_state.moving_history = updated_history
+    # --- TEMPERATURE INDEPENDENT ALERTS ---
+    with col_status1:
+        if is_temp_abnormal:
+            st.error(f"❌ Temperature is Abnormal: {test_temp}°C")
+        else:
+            st.success(f"🟢 Temperature is Normal: {test_temp}°C")
+            
+    # --- PRESSURE INDEPENDENT ALERTS ---
+    with col_status2:
+        if is_pressure_abnormal:
+            st.error(f"❌ Pressure is Abnormal: {test_pressure} Bar")
+        else:
+            st.success(f"🟢 Pressure is Normal: {test_pressure} Bar")
 
- # --- UI INTERFACE DISPLAY: STATUS PANELS ---
-st.markdown("### 📊 Live Component Status")
-col_status1, col_status2, col_status3 = st.columns(3)
-
-with col_status1:
-    if is_temp_abnormal:
-        st.error(f"❌ Temperature is Abnormal: {test_temp}°C")
-    else:
-        st.success(f"🟢 Temperature is Normal: {test_temp}°C")
-        
-with col_status2:
-    if is_pressure_abnormal:
-        st.error(f"❌ Pressure is Abnormal: {test_pressure} Bar")
-    else:
-        st.success(f"🟢 Pressure is Normal: {test_pressure} Bar")
-
-with col_status3:
-    if current_guess == -1:
-        st.error(f"⚠️ SIEM ALERT TRIGGERED! Abnormal Operational Telemetry: {test_temp}°C at {test_pressure} Bar")
-    else:
-        st.success("🟢 AI Model Vector: Stable")
-
-    # ----------------- SECTION 2: DYNAMIC MOVING GRAPH LAYER -----------------
-    st.markdown("---")
-    st.header("📉 Real-Time Rolling Sensor Tracking")
-    st.write("This dynamic graph renders the moving window timeline of your adjustments. Watch the red marker classify metrics live.")
-
-    df_move = st.session_state.moving_history
-    move_anomalies = df_move[df_move['AI_Guess'] == -1]
-
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 5), sharex=True)
-    
-    # Subplot 1: Dynamic Rolling Temperature
-    ax1.plot(df_move['Timestamp'], df_move['Temperature_Celsius'], color='black', label='Temp Path', alpha=0.5, marker='o', markersize=3)
-    if not move_anomalies.empty:
-        ax1.scatter(move_anomalies['Timestamp'], move_anomalies['Temperature_Celsius'], color='red', s=60, label='AI Flagged Anomaly', zorder=5)
-    ax1.set_ylabel("Temperature (°C)")
-    ax1.legend(loc="upper left")
-    ax1.grid(True, linestyle="--", alpha=0.6)
-    ax1.set_title("Rolling 2D Isolation Forest Classification Vector")
-
-    # Subplot 2: Dynamic Rolling Pressure
-    ax2.plot(df_move['Timestamp'], df_move['Pressure_Bar'], color='blue', label='Pressure Path', alpha=0.5, marker='o', markersize=3)
-    if not move_anomalies.empty:
-        ax2.scatter(move_anomalies['Timestamp'], move_anomalies['Pressure_Bar'], color='red', s=60, label='AI Flagged Anomaly', zorder=5)
-    ax2.set_ylabel("Pressure (Bar)")
-    ax2.legend(loc="upper left")
-    ax2.grid(True, linestyle="--", alpha=0.6)
-    
-    st.pyplot(fig)
-
-    # ----------------- SECTION 3: OCSF LOGGING & GENAI COPILOT PIPELINE -----------------
-    if current_guess == -1 or is_temp_abnormal or is_pressure_abnormal:
+    # 3. If either metric is broken, the AI triggers the backend OCSF log generation
+    if guess == -1 or is_temp_abnormal or is_pressure_abnormal:
+        # Determine appropriate severity tier based on the split conditions
         if is_temp_abnormal and is_pressure_abnormal:
             severity_label = "Critical"
             severity_num = 5
@@ -198,6 +175,7 @@ with col_status3:
             severity_num = 4
             finding_title = f"Single-Metric {'Temperature' if is_temp_abnormal else 'Pressure'} Deviation"
 
+        # Calculate local timestamp adjusted for India Standard Time (IST)
         local_timestamp = int(datetime.now().timestamp()) + 19800
         
         ocsf_log = {
@@ -252,11 +230,15 @@ with col_status3:
                 if "GEMINI_API_KEY" in st.secrets:
                     try:
                         client_chat = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+                        
                         chat_prompt = f"""
                         Context Log: {log_string}
+                        
                         User Question: {user_question}
+                        
                         Answer the user's question accurately. Use the current temperature ({test_temp}°C) and pressure ({test_pressure} Bar) anomalies to provide specific context. Keep it concise.
                         """
+                        
                         with st.spinner("Gemini is thinking..."):
                             chat_response = client_chat.models.generate_content(
                                 model='gemini-3.5-flash',
@@ -264,6 +246,7 @@ with col_status3:
                             )
                             st.info(chat_response.text)
                     except Exception as e:
+                        # ---- GRACEFUL CHAT FALLBACK FOR 429 RATE LIMITS ----
                         if "429" in str(e) or "QUOTA" in str(e).upper():
                             q_lower = user_question.lower()
                             if "gear" in q_lower or "safety" in q_lower or "ppe" in q_lower:
@@ -278,3 +261,5 @@ with col_status3:
                     st.warning("Please configure your API Key to use the interactive chat box.")
     else:
         st.success(f"🟢 System Telemetry Stable: Temperature ({test_temp}°C) and Pressure ({test_pressure} Bar) operate safely within standard deviation limits.")
+else:
+    st.info("🔄 Running training sequence. Please interact with the slider bars again.")
